@@ -47,3 +47,11 @@ logs/
 # Test artifacts
 playwright-report/
 test-results/
+
+# Local secrets and generated data
+.env
+.env.*
+!.env.example
+backend/app/storage/encrypted/
+backend/reset_password.py
+backend/set_owner_role.py
