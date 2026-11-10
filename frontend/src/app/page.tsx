@@ -13,6 +13,12 @@ type DocumentItem = {
   created_at: string;
 };
 
+type PermissionItem = {
+  user_id: string;
+  email: string;
+  permission: string;
+};
+
 export default function Home() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [token, setToken] = useState("");
@@ -24,6 +30,13 @@ export default function Home() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
+
+  // Document sharing state
+  const [sharingDoc, setSharingDoc] = useState<DocumentItem | null>(null);
+  const [shareEmail, setShareEmail] = useState("");
+  const [sharePermission, setSharePermission] = useState("read");
+  const [permissions, setPermissions] = useState<PermissionItem[]>([]);
+  const [sharing, setSharing] = useState(false);
 
   async function loadDocuments(accessToken: string) {
     const response = await apiRequest("/api/v1/documents/", accessToken);
@@ -115,6 +128,7 @@ export default function Home() {
 
     setLoading(true);
     setError("");
+    setNotice("");
 
     try {
       await apiRequest("/api/v1/documents/upload", token, {
@@ -123,6 +137,7 @@ export default function Home() {
       });
 
       await loadDocuments(token);
+      setNotice("Document uploaded and secured successfully.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -132,6 +147,7 @@ export default function Home() {
 
   async function downloadDocument(doc: DocumentItem) {
     setError("");
+    setNotice("");
 
     try {
       const response = await apiRequest(
@@ -150,8 +166,102 @@ export default function Home() {
       link.remove();
 
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice("Document downloaded successfully.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed");
+    }
+  }
+
+  // Open sharing window and load existing permissions
+  async function openShare(doc: DocumentItem) {
+    setSharingDoc(doc);
+    setShareEmail("");
+    setSharePermission("read");
+    setPermissions([]);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await apiRequest(
+        `/api/v1/documents/${doc.id}/permissions`,
+        token
+      );
+
+      const data = await response.json();
+      setPermissions(data);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not load sharing permissions"
+      );
+    }
+  }
+
+  // Share document with another registered user
+  async function shareDocument(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!sharingDoc) return;
+
+    setSharing(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const formData = new FormData();
+      formData.append("email", shareEmail.trim());
+      formData.append("permission", sharePermission);
+
+      await apiRequest(
+        `/api/v1/documents/${sharingDoc.id}/permissions`,
+        token,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      setNotice(`Document shared successfully with ${shareEmail.trim()}.`);
+      setShareEmail("");
+
+      const response = await apiRequest(
+        `/api/v1/documents/${sharingDoc.id}/permissions`,
+        token
+      );
+
+      const data = await response.json();
+      setPermissions(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sharing failed");
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  // Revoke an existing user's document access
+  async function revokeAccess(userId: string) {
+    if (!sharingDoc) return;
+
+    setError("");
+    setNotice("");
+
+    try {
+      await apiRequest(
+        `/api/v1/documents/${sharingDoc.id}/permissions/${userId}`,
+        token,
+        { method: "DELETE" }
+      );
+
+      setPermissions((previous) =>
+        previous.filter((permission) => permission.user_id !== userId)
+      );
+
+      setNotice("Document access revoked successfully.");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not revoke access"
+      );
     }
   }
 
@@ -159,6 +269,8 @@ export default function Home() {
     setToken("");
     setPassword("");
     setDocuments([]);
+    setSharingDoc(null);
+    setPermissions([]);
     setError("");
     setNotice("");
   }
@@ -167,6 +279,7 @@ export default function Home() {
     doc.name.toLowerCase().includes(search.toLowerCase())
   );
 
+  // Login and registration screen
   if (!token) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
@@ -270,6 +383,7 @@ export default function Home() {
     );
   }
 
+  // Main dashboard
   return (
     <main className="min-h-screen bg-slate-100 text-slate-800 md:flex">
       <aside className="bg-white p-6 md:min-h-screen md:w-64">
@@ -287,6 +401,13 @@ export default function Home() {
 
         <div className="mt-8 rounded-xl bg-green-50 p-4 text-sm text-green-700">
           AES-256-GCM encryption enabled
+        </div>
+
+        <div className="mt-4 rounded-xl bg-blue-50 p-4 text-sm text-blue-700">
+          <p className="font-semibold">Secure sharing</p>
+          <p className="mt-1 text-xs">
+            Control who can access your documents.
+          </p>
         </div>
 
         <button
@@ -354,6 +475,12 @@ export default function Home() {
           </p>
         )}
 
+        {notice && (
+          <p className="mb-4 rounded-xl bg-green-50 p-3 text-green-700">
+            {notice}
+          </p>
+        )}
+
         {loading && (
           <p className="mb-4 text-sm text-blue-600">Loading...</p>
         )}
@@ -382,12 +509,21 @@ export default function Home() {
                     {doc.encrypted ? "Encrypted" : "Not encrypted"}
                   </td>
                   <td className="p-5">
-                    <button
-                      onClick={() => void downloadDocument(doc)}
-                      className="font-semibold text-blue-700 hover:underline"
-                    >
-                      Download
-                    </button>
+                    <div className="flex gap-4">
+                      <button
+                        onClick={() => void downloadDocument(doc)}
+                        className="font-semibold text-blue-700 hover:underline"
+                      >
+                        Download
+                      </button>
+
+                      <button
+                        onClick={() => void openShare(doc)}
+                        className="font-semibold text-emerald-700 hover:underline"
+                      >
+                        Share
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -405,6 +541,130 @@ export default function Home() {
             </tbody>
           </table>
         </div>
+
+        {/* Document sharing modal */}
+        {sharingDoc && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+              <div className="mb-5 flex items-center justify-between">
+                <h3 className="text-xl font-bold">Share document</h3>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSharingDoc(null);
+                    setPermissions([]);
+                    setError("");
+                    setNotice("");
+                  }}
+                  className="text-2xl text-slate-500"
+                  aria-label="Close sharing window"
+                >
+                  ×
+                </button>
+              </div>
+
+              <p className="mb-4 text-sm text-slate-500">
+                Sharing: <strong>{sharingDoc.name}</strong>
+              </p>
+
+              <p className="mb-4 text-sm text-slate-500">
+                Sharing: <strong>{sharingDoc.name}</strong>
+              </p>
+
+              {error && (
+                <p className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                  {error}
+                </p>
+              )}
+
+              {notice && (
+                <p className="mb-3 rounded-lg bg-green-50 p-3 text-sm text-green-700">
+                  {notice}
+                </p>
+              )}
+
+              <form onSubmit={shareDocument} className="space-y-3">
+                <label className="block text-sm font-medium text-slate-700">
+                  Recipient email
+                </label>
+
+                <input
+                  type="email"
+                  required
+                  value={shareEmail}
+                  onChange={(event) => setShareEmail(event.target.value)}
+                  placeholder="Enter registered user's email"
+                  className="w-full rounded-xl border p-3"
+                />
+
+                <label className="block text-sm font-medium text-slate-700">
+                  Access permission
+                </label>
+
+                <select
+                  value={sharePermission}
+                  onChange={(event) => setSharePermission(event.target.value)}
+                  className="w-full rounded-xl border p-3"
+                >
+                  <option value="read">Read access</option>
+                  <option value="edit">Edit access</option>
+                </select>
+
+                <button
+                  type="submit"
+                  disabled={sharing || !shareEmail.trim()}
+                  className="w-full rounded-xl bg-blue-700 p-3 font-semibold text-white disabled:opacity-50"
+                >
+                  {sharing ? "Sharing..." : "Share securely"}
+                </button>
+              </form>
+
+              <div className="mt-6 border-t pt-5">
+                <h4 className="mb-3 font-semibold">
+                  People with access
+                </h4>
+
+                {permissions.length === 0 ? (
+                  <p className="text-sm text-slate-500">
+                    No one else has access yet.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {permissions.map((permission) => (
+                      <div
+                        key={permission.user_id}
+                        className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 p-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {permission.email}
+                          </p>
+
+                          <p className="text-xs capitalize text-slate-500">
+                            {permission.permission} access
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => void revokeAccess(permission.user_id)}
+                          className="shrink-0 text-sm font-semibold text-red-600 hover:underline"
+                        >
+                          Revoke
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <p className="mt-5 text-xs text-slate-400">
+                Only the document owner can manage sharing permissions.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
     </main>
   );
