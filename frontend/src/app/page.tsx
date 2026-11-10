@@ -1,4 +1,5 @@
-﻿"use client";
+﻿
+"use client";
 
 import { useState } from "react";
 import type { FormEvent } from "react";
@@ -15,10 +16,13 @@ type DocumentItem = {
 export default function Home() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [token, setToken] = useState("");
-  const [email, setEmail] = useState("owner@test.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [isRegistering, setIsRegistering] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
 
   async function loadDocuments(accessToken: string) {
@@ -31,6 +35,7 @@ export default function Home() {
     event.preventDefault();
     setLoading(true);
     setError("");
+    setNotice("");
 
     try {
       const response = await fetch(
@@ -52,6 +57,50 @@ export default function Home() {
       await loadDocuments(data.access_token);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
+      setToken("");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function register(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/register`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            full_name: fullName.trim(),
+            email: email.trim(),
+            password,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const message = Array.isArray(data.detail)
+          ? data.detail.map((item: { msg: string }) => item.msg).join(", ")
+          : data.detail || "Registration failed";
+
+        throw new Error(message);
+      }
+
+      setIsRegistering(false);
+      setPassword("");
+      setFullName("");
+      setNotice("Account created successfully! Please sign in.");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Registration failed"
+      );
     } finally {
       setLoading(false);
     }
@@ -111,6 +160,7 @@ export default function Home() {
     setPassword("");
     setDocuments([]);
     setError("");
+    setNotice("");
   }
 
   const filteredDocuments = documents.filter((doc) =>
@@ -121,11 +171,33 @@ export default function Home() {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
         <form
-          onSubmit={login}
+          onSubmit={isRegistering ? register : login}
           className="w-full max-w-md space-y-5 rounded-2xl bg-white p-8 shadow-lg"
         >
-          <h1 className="text-3xl font-bold text-blue-700">TrustVault</h1>
-          <p className="text-slate-500">Secure document management</p>
+          <h1 className="text-3xl font-bold text-blue-700">
+            TrustVault
+          </h1>
+
+          <p className="text-slate-500">
+            Secure document management
+          </p>
+
+          <h2 className="text-xl font-semibold text-slate-800">
+            {isRegistering ? "Create your account" : "Welcome back"}
+          </h2>
+
+          {isRegistering && (
+            <input
+              type="text"
+              required
+              minLength={2}
+              maxLength={150}
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+              placeholder="Full name"
+              className="w-full rounded-xl border p-3"
+            />
+          )}
 
           <input
             type="email"
@@ -139,21 +211,60 @@ export default function Home() {
           <input
             type="password"
             required
+            minLength={isRegistering ? 12 : undefined}
+            maxLength={128}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            placeholder="Password"
+            placeholder={
+              isRegistering
+                ? "Password (minimum 12 characters)"
+                : "Password"
+            }
             className="w-full rounded-xl border p-3"
           />
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {notice && (
+            <p className="rounded-xl bg-green-50 p-3 text-sm text-green-700">
+              {notice}
+            </p>
+          )}
+
+          {error && (
+            <p className="rounded-xl bg-red-50 p-3 text-sm text-red-600">
+              {error}
+            </p>
+          )}
 
           <button
             type="submit"
             disabled={loading}
             className="w-full rounded-xl bg-blue-700 p-3 font-semibold text-white disabled:opacity-50"
           >
-            {loading ? "Signing in..." : "Sign in"}
+            {loading
+              ? "Please wait..."
+              : isRegistering
+                ? "Create account"
+                : "Sign in"}
           </button>
+
+          <p className="text-center text-sm text-slate-600">
+            {isRegistering
+              ? "Already have an account?"
+              : "Don't have an account?"}{" "}
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                setIsRegistering(!isRegistering);
+                setError("");
+                setNotice("");
+                setPassword("");
+              }}
+              className="font-semibold text-blue-700 hover:underline"
+            >
+              {isRegistering ? "Sign in" : "Register"}
+            </button>
+          </p>
         </form>
       </main>
     );
@@ -162,7 +273,9 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-100 text-slate-800 md:flex">
       <aside className="bg-white p-6 md:min-h-screen md:w-64">
-        <h1 className="mb-3 text-2xl font-bold text-blue-700">TrustVault</h1>
+        <h1 className="mb-3 text-2xl font-bold text-blue-700">
+          TrustVault
+        </h1>
 
         <p className="mb-10 text-xs text-slate-400">
           Secure document management
